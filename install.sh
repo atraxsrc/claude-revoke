@@ -27,7 +27,7 @@ sed -e "s|@TERM@|$term|" -e "s|@BIN@|$bin/claude-revoke|" \
 command -v update-desktop-database >/dev/null && update-desktop-database "$apps" 2>/dev/null || true
 
 # systemd user units for the optional scheduled audit (off until you enable it)
-units="$HOME/.config/systemd/user"
+units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$units"
 sed -e "s|@BIN@|$bin/claude-revoke|" "$here/packaging/claude-revoke-audit.service.in" > "$units/claude-revoke-audit.service"
 install -m 644 "$here/packaging/claude-revoke-audit.timer" "$units/claude-revoke-audit.timer"
