@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-10
 
 - Packages: `.deb`, `.rpm` and Arch packages are built from one nfpm config, installed and smoke-tested on Debian, Fedora and Arch by CI, and attached to every GitHub release together with `SHA256SUMS`. The launcher entry from a package opens your desktop's default terminal.
 - CI runs the test suite on every push and pull request.
