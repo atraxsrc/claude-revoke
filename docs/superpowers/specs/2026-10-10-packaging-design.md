@@ -139,8 +139,11 @@ changelog heading remain the only version bump."
 - Checksum mismatch on the nfpm download: the archive is deleted and the
   build stops.
 - Tag/version mismatch at publish time: CI fails before uploading anything.
-- Any smoke job failing blocks publish; the release stays without assets
-  and can be re-run with `workflow_dispatch` after a fix.
+- Any smoke job failing blocks publish and the release stays without
+  assets. For a flaky failure, re-run the failed jobs on that release's
+  workflow run. A code fix needs a new tag and release, because the release
+  run builds the tagged commit; `workflow_dispatch` runs build and smoke
+  only and never publishes.
 
 ## Release flow after this lands
 

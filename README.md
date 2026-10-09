@@ -48,6 +48,8 @@ sudo pacman -U ./claude-revoke-*.pkg.tar.zst    # Arch
 
 This installs the `claude-revoke` command and a **Claude Revoke** launcher entry that opens in your desktop's default terminal. `SHA256SUMS` on the release page lets you check the download. Remove with `sudo apt remove claude-revoke`, `sudo dnf remove claude-revoke` or `sudo pacman -R claude-revoke`.
 
+If you installed from source before, run `./uninstall.sh` first. Otherwise the old copy in `~/.local/bin` keeps shadowing the package, and upgrades seem to do nothing.
+
 ### From source (any distro)
 
 ```bash

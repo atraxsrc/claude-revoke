@@ -5,7 +5,8 @@
 #   packaging/build.sh stage    only create dist/stage/ (no network, no nfpm)
 #
 # The version is read from __version__ in claude_revoke.py. Override the output
-# folder with DIST=<dir>.
+# folder with DIST=<dir> (only claude-revoke* files in it are replaced) and the
+# nfpm binary with NFPM=<path>.
 set -euo pipefail
 
 # Pinned nfpm release used when nfpm is not already on PATH.
@@ -15,7 +16,9 @@ NFPM_URL="${NFPM_URL:-https://github.com/goreleaser/nfpm/releases/download/v${NF
 NFPM_SHA256="${NFPM_SHA256:-0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783}"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-dist="${DIST:-$root/dist}"
+# Resolve DIST to an absolute path: nfpm runs from inside the stage folder.
+mkdir -p "${DIST:-$root/dist}"
+dist="$(cd "${DIST:-$root/dist}" && pwd)"
 stage="$dist/stage"
 
 fail() { echo "build.sh: $*" >&2; exit 1; }
@@ -56,6 +59,11 @@ do_stage() {
 }
 
 find_nfpm() {
+    if [ -n "${NFPM:-}" ]; then          # explicit binary (tests use a stub here)
+        [ -x "$NFPM" ] || fail "NFPM=$NFPM is not executable"
+        echo "$NFPM"
+        return
+    fi
     if command -v nfpm >/dev/null 2>&1; then
         command -v nfpm
         return
@@ -81,15 +89,16 @@ do_build() {
     local nfpm v
     nfpm="$(find_nfpm)"
     v="$(version)"
-    rm -f "$dist"/*.deb "$dist"/*.rpm "$dist"/*.pkg.tar.zst "$dist/SHA256SUMS"
+    # Only our own packages are replaced; DIST may hold other people's files.
+    rm -f "$dist"/claude-revoke*.deb "$dist"/claude-revoke*.rpm "$dist"/claude-revoke*.pkg.tar.zst "$dist/SHA256SUMS"
     for packager in deb rpm archlinux; do
         (cd "$stage" && VERSION="$v" "$nfpm" package --config "$root/packaging/nfpm.yaml" \
             --packager "$packager" --target "$dist/")
     done
-    (cd "$dist" && sha256sum ./*.deb ./*.rpm ./*.pkg.tar.zst | sed 's|^\([^ ]*\)  \./|\1  |' > SHA256SUMS)
+    (cd "$dist" && sha256sum claude-revoke*.deb claude-revoke*.rpm claude-revoke*.pkg.tar.zst > SHA256SUMS)
     echo
     echo "Packages in $dist:"
-    (cd "$dist" && ls -1 ./*.deb ./*.rpm ./*.pkg.tar.zst SHA256SUMS | sed 's|^\./|  |;s|^SHA|  SHA|')
+    (cd "$dist" && ls -1 claude-revoke*.deb claude-revoke*.rpm claude-revoke*.pkg.tar.zst SHA256SUMS | sed 's|^|  |')
 }
 
 case "${1:-build}" in
