@@ -122,10 +122,7 @@ python3 -m unittest discover -s tests   # runs against a temporary fake home fol
 - [ ] `.deb` package and Pop!_OS install via a PPA
 - [ ] Support for other agents (Codex CLI, Gemini CLI, Cursor)
 - [ ] Scheduled audits with a desktop notification
-- [ ] `--restore` puts back only what was removed, instead of replacing the whole `~/.claude.json`
-- [ ] Fewer false positives from the secret scan, with redacted matches and file/line so hits can be checked
-- [ ] No crash on unexpected settings JSON (non-dict hooks, non-string rules)
-- [ ] Desktop launcher keeps the window open so the undo command can be read
+- [ ] Improvements 
 
 ## License
 
