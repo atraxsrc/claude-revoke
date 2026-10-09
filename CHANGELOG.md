@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Packages: `.deb`, `.rpm` and Arch packages are built from one nfpm config, installed and smoke-tested on Debian, Fedora and Arch by CI, and attached to every GitHub release together with `SHA256SUMS`. The launcher entry from a package opens your desktop's default terminal.
+- CI runs the test suite on every push and pull request.
+
 ## 0.2.0 - 2026-10-10
 
 - Fix: rewriting `~/.claude.json` or `~/.claude/settings.json` no longer loosens their permissions (a `0600` file stayed `0600`, new files are created `0600`).

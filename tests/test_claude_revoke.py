@@ -374,7 +374,10 @@ class TestVersion(unittest.TestCase):
 
     def test_changelog_top_entry_matches_version(self):
         heads = [l for l in (ROOT / "CHANGELOG.md").read_text().splitlines() if l.startswith("## ")]
-        self.assertTrue(heads[0].startswith(f"## {cr.__version__} - "), heads[0])
+        released = f"## {cr.__version__} - "
+        self.assertTrue(heads[0] == "## Unreleased" or heads[0].startswith(released), heads[0])
+        self.assertTrue(any(h.startswith(released) for h in heads), heads)
+        self.assertEqual(heads.count("## Unreleased"), 1 if heads[0] == "## Unreleased" else 0)
 
 
 if __name__ == "__main__":
