@@ -8,6 +8,12 @@
 # folder with DIST=<dir>.
 set -euo pipefail
 
+# Pinned nfpm release used when nfpm is not already on PATH.
+NFPM_VERSION="2.47.0"
+NFPM_TGZ="nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+NFPM_URL="${NFPM_URL:-https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/${NFPM_TGZ}}"
+NFPM_SHA256="${NFPM_SHA256:-0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783}"
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist="${DIST:-$root/dist}"
 stage="$dist/stage"
@@ -49,8 +55,45 @@ do_stage() {
     echo "staged $v in $stage"
 }
 
+find_nfpm() {
+    if command -v nfpm >/dev/null 2>&1; then
+        command -v nfpm
+        return
+    fi
+    local bin="$dist/tools/nfpm" tgz="$dist/tools/$NFPM_TGZ"
+    if [ ! -x "$bin" ]; then
+        [ "$(uname -m)" = "x86_64" ] || fail "no pinned nfpm for $(uname -m): install nfpm (https://nfpm.goreleaser.com) and re-run"
+        mkdir -p "$dist/tools"
+        echo "downloading nfpm $NFPM_VERSION" >&2
+        curl -sSfL -o "$tgz" "$NFPM_URL"
+        if ! echo "$NFPM_SHA256  $tgz" | sha256sum -c --status -; then
+            rm -f "$tgz"
+            fail "nfpm download does not match the pinned checksum, aborting"
+        fi
+        tar -xzf "$tgz" -C "$dist/tools" nfpm
+        rm -f "$tgz"
+    fi
+    echo "$bin"
+}
+
+do_build() {
+    do_stage
+    local nfpm v
+    nfpm="$(find_nfpm)"
+    v="$(version)"
+    rm -f "$dist"/*.deb "$dist"/*.rpm "$dist"/*.pkg.tar.zst "$dist/SHA256SUMS"
+    for packager in deb rpm archlinux; do
+        (cd "$stage" && VERSION="$v" "$nfpm" package --config "$root/packaging/nfpm.yaml" \
+            --packager "$packager" --target "$dist/")
+    done
+    (cd "$dist" && sha256sum ./*.deb ./*.rpm ./*.pkg.tar.zst | sed 's|^\([^ ]*\)  \./|\1  |' > SHA256SUMS)
+    echo
+    echo "Packages in $dist:"
+    (cd "$dist" && ls -1 ./*.deb ./*.rpm ./*.pkg.tar.zst SHA256SUMS | sed 's|^\./|  |;s|^SHA|  SHA|')
+}
+
 case "${1:-build}" in
     stage) do_stage ;;
-    build) fail "the build step is not implemented yet" ;;
+    build) do_build ;;
     *) echo "usage: $0 [stage|build]" >&2; exit 2 ;;
 esac
