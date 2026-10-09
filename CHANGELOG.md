@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-10-10
 
 - New: scheduled audits. `claude-revoke --schedule weekly` (or `daily`, `off`) enables a systemd user timer that runs `claude-revoke --notify`: the usual scan, a one-line summary in the journal, and a desktop notification when anything is stale or risky, once per change. Off by default, never changes anything.
 - New: `--notify` flag (what the timer runs). Needs `notify-send` for the notification; the packages recommend `libnotify-bin`/`libnotify`.
