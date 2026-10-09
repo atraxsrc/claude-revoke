@@ -39,7 +39,8 @@ do_stage() {
     local v f
     v="$(version)"
     # Check every input before touching dist/, so a failure leaves no half-staged tree.
-    for f in claude_revoke.py assets/logo.svg README.md CHANGELOG.md LICENSE packaging/claude-revoke.desktop.in; do
+    for f in claude_revoke.py assets/logo.svg README.md CHANGELOG.md LICENSE packaging/claude-revoke.desktop.in \
+             packaging/claude-revoke-audit.service.in packaging/claude-revoke-audit.timer; do
         [ -f "$root/$f" ] || fail "missing source file $f"
     done
     rm -rf "$stage"
@@ -55,6 +56,11 @@ do_stage() {
     sed -e 's|^Exec=.*|Exec=claude-revoke --pause|' -e 's|^Terminal=false$|Terminal=true|' \
         "$root/packaging/claude-revoke.desktop.in" > "$stage/usr/share/applications/claude-revoke.desktop"
     chmod 644 "$stage/usr/share/applications/claude-revoke.desktop"
+    # systemd user units for the scheduled audit (off until the user enables them)
+    put packaging/claude-revoke-audit.timer /usr/lib/systemd/user/claude-revoke-audit.timer 644
+    sed -e 's|@BIN@|/usr/bin/claude-revoke|' "$root/packaging/claude-revoke-audit.service.in" \
+        > "$stage/usr/lib/systemd/user/claude-revoke-audit.service"
+    chmod 644 "$stage/usr/lib/systemd/user/claude-revoke-audit.service"
     echo "staged $v in $stage"
 }
 

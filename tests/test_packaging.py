@@ -23,11 +23,14 @@ STAGED = {
     "usr/share/doc/claude-revoke/CHANGELOG.md": 0o644,
     "usr/share/doc/claude-revoke/LICENSE": 0o644,
     "usr/share/doc/claude-revoke/copyright": 0o644,
+    "usr/lib/systemd/user/claude-revoke-audit.service": 0o644,
+    "usr/lib/systemd/user/claude-revoke-audit.timer": 0o644,
 }
 
 # Everything build.sh reads from the repo; copied into a temp tree by the failure tests.
 SOURCES = ["claude_revoke.py", "assets/logo.svg", "README.md", "CHANGELOG.md", "LICENSE",
-           "packaging/build.sh", "packaging/claude-revoke.desktop.in", "packaging/nfpm.yaml"]
+           "packaging/build.sh", "packaging/claude-revoke.desktop.in", "packaging/nfpm.yaml",
+           "packaging/claude-revoke-audit.service.in", "packaging/claude-revoke-audit.timer"]
 
 
 def run_build(script, *args, env=None, cwd=None, timeout=60):
@@ -96,6 +99,19 @@ class TestStage(unittest.TestCase):
     def test_reports_the_script_version(self):
         self.assertIn(f"staged {cr.__version__} in ", self.out)
 
+    def test_systemd_units_point_at_the_packaged_binary(self):
+        service = (self.stage / "usr/lib/systemd/user/claude-revoke-audit.service").read_text()
+        self.assertIn("ExecStart=/usr/bin/claude-revoke --notify\n", service)
+        self.assertNotIn("@BIN@", service)
+        self.assertEqual((self.stage / "usr/lib/systemd/user/claude-revoke-audit.timer").read_bytes(),
+                         (ROOT / "packaging/claude-revoke-audit.timer").read_bytes())
+
+    def test_timer_defaults_to_weekly_and_catches_up_after_sleep(self):
+        timer = (ROOT / "packaging/claude-revoke-audit.timer").read_text()
+        self.assertIn("OnCalendar=weekly\n", timer)
+        self.assertIn("Persistent=true\n", timer)
+        self.assertIn("WantedBy=timers.target\n", timer)
+
 
 class TestStageFailures(unittest.TestCase):
     def setUp(self):
@@ -137,6 +153,10 @@ class TestNfpmConfig(unittest.TestCase):
 
     def test_version_comes_from_the_environment(self):
         self.assertIn("version: ${VERSION}", self.text)
+
+    def test_recommends_libnotify_for_desktop_notifications(self):
+        self.assertIn("libnotify-bin", self.text)    # deb name
+        self.assertIn("- libnotify\n", self.text)    # rpm name
 
 
 class TestBuildFailures(unittest.TestCase):
