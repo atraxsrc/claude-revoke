@@ -380,5 +380,116 @@ class TestVersion(unittest.TestCase):
         self.assertEqual(heads.count("## Unreleased"), 1 if heads[0] == "## Unreleased" else 0)
 
 
+class TestSummarize(unittest.TestCase):
+    def item(self, kind="trust", **kw):
+        return cr.Item(kind, "/x", "/x", **kw)
+
+    def test_nothing_to_report(self):
+        cats = [cr.Category("Trusted projects", "", [self.item()]),
+                cr.Category("Global settings", "", [])]
+        self.assertIsNone(cr.summarize(cats))
+
+    def test_counts_stale_and_risky_per_category(self):
+        cats = [cr.Category("Trusted projects", "",
+                            [self.item(stale=True), self.item(stale=True), self.item(risky=True)]),
+                cr.Category("Session transcripts", "",
+                            [self.item("session", risky=True, badge="1.2K  2026-10-10  SECRETS:3")]),
+                cr.Category("Project settings files", "", [self.item("settings")])]
+        self.assertEqual(cr.summarize(cats),
+                         "Trusted projects: 2 stale, 1 risky; Session transcripts: 1 risky (1 with secrets)")
+
+
+class TestNotifyFlag(FakeHome):
+    """--notify is what the systemd timer runs: scan, one summary line, desktop notification."""
+
+    def run_notify(self, with_notify_send=True):
+        bindir = self.home / "bin"
+        bindir.mkdir(exist_ok=True)
+        log = self.home / "notify.log"
+        if with_notify_send:
+            stub = bindir / "notify-send"
+            stub.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" >> "$NOTIFY_LOG"\n')
+            stub.chmod(0o755)
+        env = dict(os.environ, CLAUDE_REVOKE_HOME=str(self.home), PYTHONDONTWRITEBYTECODE="1",
+                   PATH=str(bindir), NOTIFY_LOG=str(log))
+        r = subprocess.run([sys.executable, str(SCRIPT), "--notify", "--no-secret-scan"], env=env,
+                           capture_output=True, text=True, timeout=60)
+        return r, (log.read_text() if log.exists() else "")
+
+    def test_notifies_when_something_is_stale(self):
+        self.write(".claude.json", {"projects": {"/gone/app": {}}})
+        r, sent = self.run_notify()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Trusted projects: 1 stale", r.stdout)
+        self.assertIn("--app-name=claude-revoke", sent)
+        self.assertIn("Trusted projects: 1 stale", sent)
+        self.assertIn("Run claude-revoke to review", sent)
+
+    def test_quiet_when_nothing_found(self):
+        r, sent = self.run_notify()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("nothing stale or risky", r.stdout)
+        self.assertEqual(sent, "")
+
+    def test_still_exits_zero_without_notify_send(self):
+        self.write(".claude.json", {"projects": {"/gone/app": {}}})
+        r, sent = self.run_notify(with_notify_send=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("libnotify", r.stderr)
+        self.assertEqual(sent, "")
+
+
+class TestScheduleFlag(FakeHome):
+    """--schedule weekly|daily|off drives the systemd user timer through systemctl."""
+
+    def run_schedule(self, choice, with_systemctl=True):
+        bindir = self.home / "bin"
+        bindir.mkdir(exist_ok=True)
+        log = self.home / "systemctl.log"
+        if with_systemctl:
+            stub = bindir / "systemctl"
+            stub.write_text('#!/bin/sh\necho "$*" >> "$SYSTEMCTL_LOG"\n')
+            stub.chmod(0o755)
+        env = dict(os.environ, CLAUDE_REVOKE_HOME=str(self.home), PYTHONDONTWRITEBYTECODE="1",
+                   PATH=str(bindir), SYSTEMCTL_LOG=str(log))
+        r = subprocess.run([sys.executable, str(SCRIPT), "--schedule", choice], env=env,
+                           capture_output=True, text=True, timeout=60)
+        calls = log.read_text().splitlines() if log.exists() else []
+        return r, calls
+
+    def dropin(self):
+        return self.home / ".config/systemd/user/claude-revoke-audit.timer.d/schedule.conf"
+
+    def test_daily_writes_dropin_and_enables_timer(self):
+        r, calls = self.run_schedule("daily")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.dropin().read_text(), "[Timer]\nOnCalendar=\nOnCalendar=daily\n")
+        self.assertEqual(calls, ["--user daemon-reload", "--user enable --now claude-revoke-audit.timer"])
+        self.assertIn("daily", r.stdout)
+
+    def test_weekly_overrides_an_earlier_choice(self):
+        self.run_schedule("daily")
+        r, _ = self.run_schedule("weekly")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("OnCalendar=weekly", self.dropin().read_text())
+
+    def test_off_disables_timer(self):
+        r, calls = self.run_schedule("off")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(calls, ["--user disable --now claude-revoke-audit.timer"])
+        self.assertIn("off", r.stdout)
+
+    def test_rejects_other_values(self):
+        r, calls = self.run_schedule("hourly")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(calls, [])
+
+    def test_fails_clearly_without_systemctl(self):
+        r, calls = self.run_schedule("weekly", with_systemctl=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("systemctl", r.stderr)
+        self.assertFalse(self.dropin().exists())
+
+
 if __name__ == "__main__":
     unittest.main()
