@@ -111,6 +111,12 @@ This cleans up configuration and stored data. It does not sandbox Claude Code, w
 
 Claude Code's file layout can change between versions. Run `--report` first and check it against your machine.
 
+## Development
+
+```bash
+python3 -m unittest discover -s tests   # runs against a temporary fake home folder
+```
+
 ## Roadmap
 
 - [ ] `.deb` package and Pop!_OS install via a PPA

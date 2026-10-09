@@ -58,9 +58,11 @@ ACCENT = 4
 
 SKIP_DIRS = {
     "node_modules", ".git", ".cache", ".npm", ".cargo", ".rustup", ".venv", "venv",
-    "__pycache__", ".claude-revoke-quarantine", "Trash", "proc", "sys", "dev", "run",
+    "__pycache__", ".claude-revoke-quarantine", "Trash",
     ".local", ".mozilla", ".steam", "snap",
 }
+# Only skipped directly under / ("dev" or "run" deeper down can be real projects).
+SKIP_ROOT_DIRS = {"proc", "sys", "dev", "run"}
 
 DENY_RULES = [
     "Read(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.gnupg/**)", "Read(~/.kube/**)",
@@ -116,10 +118,18 @@ def load_json(p):
 
 
 def write_json_atomic(p, data):
+    # Keep the original file's permissions (~/.claude.json is usually 0600);
+    # files that don't exist yet are created private.
+    try:
+        mode = os.stat(p).st_mode & 0o777
+    except OSError:
+        mode = 0o600
     tmp = Path(str(p) + ".claude-revoke.tmp")
-    with open(tmp, "w", encoding="utf-8") as fh:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
         fh.write("\n")
+    os.chmod(tmp, mode)
     os.replace(tmp, p)
 
 
@@ -310,6 +320,8 @@ def scan_settings(roots):
     for root in roots:
         root = Path(root).expanduser()
         for dirpath, dirnames, _ in os.walk(root, onerror=lambda e: None):
+            skip = SKIP_DIRS | SKIP_ROOT_DIRS if dirpath == "/" else SKIP_DIRS
+            dirnames[:] = [d for d in dirnames if d not in skip]
             if ".claude" in dirnames:
                 dirnames.remove(".claude")
                 cdir = Path(dirpath) / ".claude"
@@ -323,7 +335,6 @@ def scan_settings(roots):
                     if f.is_file() and f not in seen:
                         seen.add(f)
                         items.append(settings_item(f))
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
     items.sort(key=lambda i: i.key)
     return items
 
@@ -410,7 +421,11 @@ def describe(it):
 def apply_plan(plan):
     ts = time.strftime("%Y%m%d-%H%M%S")
     qdir = QUARANTINE_ROOT / ts
-    qdir.mkdir(parents=True, exist_ok=True)
+    # The quarantine holds transcripts and config backups: owner-only.
+    QUARANTINE_ROOT.mkdir(parents=True, exist_ok=True)
+    os.chmod(QUARANTINE_ROOT, 0o700)
+    qdir.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(qdir, 0o700)
     manifest = {"created": ts, "moves": [], "backups": []}
     log = []
     by = {}
