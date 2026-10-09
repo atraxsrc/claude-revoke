@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- New: scheduled audits. `claude-revoke --schedule weekly` (or `daily`, `off`) enables a systemd user timer that runs `claude-revoke --notify`: the usual scan, a one-line summary in the journal, and a desktop notification when anything is stale or risky. Off by default, never changes anything.
+- New: `--notify` flag (what the timer runs). Needs `notify-send` for the notification; the packages recommend `libnotify-bin`/`libnotify`.
+- Packages and `install.sh` ship the timer and service units; `uninstall.sh` stops and removes them.
+
 ## 0.3.0 - 2026-10-10
 
 - Packages: `.deb`, `.rpm` and Arch packages are built from one nfpm config, installed and smoke-tested on Debian, Fedora and Arch by CI, and attached to every GitHub release together with `SHA256SUMS`. The launcher entry from a package opens your desktop's default terminal.

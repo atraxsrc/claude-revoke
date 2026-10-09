@@ -77,6 +77,8 @@ claude-revoke --restore ~/.claude-revoke-quarantine/<timestamp>
 claude-revoke --roots ~/code ~/work    # limit where it searches for project settings
 claude-revoke --pause                  # wait for Enter before closing (the launcher entry uses this)
 claude-revoke --version                # print the version
+claude-revoke --schedule weekly        # weekly check with a desktop notification (daily | off)
+claude-revoke --notify                 # what the scheduled check runs: scan, summary, notification
 ```
 
 ### Keys
@@ -91,6 +93,24 @@ claude-revoke --version                # print the version
 | `v` | View: all → stale → risky → selected |
 | `/` | Search by folder name |
 | `Esc` / `q` | Back / quit |
+
+## Scheduled audits
+
+Let it check for you and only speak up when something needs a look:
+
+```bash
+claude-revoke --schedule weekly        # or daily; "off" turns it back off
+```
+
+Once a week a systemd user timer runs `claude-revoke --notify`: the same scan as `--report`, then a desktop notification such as "Trusted projects: 2 stale, 1 risky; Session transcripts: 1 risky (1 with secrets). Run claude-revoke to review." Nothing found, nothing shown. It never changes anything; revoking stays a decision you make in the UI.
+
+Under the hood: `claude-revoke-audit.timer` and `.service` (shipped by the packages in `/usr/lib/systemd/user/`, by `install.sh` in `~/.config/systemd/user/`), a drop-in with your chosen interval, and `notify-send` for the notification (`libnotify-bin` on Debian and Ubuntu, `libnotify` elsewhere). Useful commands:
+
+```bash
+systemctl --user status claude-revoke-audit.timer     # when it runs next
+journalctl --user -u claude-revoke-audit              # what past runs found
+systemctl --user start claude-revoke-audit.service    # run one now
+```
 
 ## Matching your terminal theme
 
@@ -138,7 +158,6 @@ packaging/build.sh                      # builds the .deb, .rpm and Arch package
 
 ## Roadmap
 
-- [ ] Scheduled audits with a desktop notification
 - [ ] AUR and COPR packages if people ask for them
 
 ## License
