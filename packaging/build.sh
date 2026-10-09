@@ -57,6 +57,7 @@ do_stage() {
         "$root/packaging/claude-revoke.desktop.in" > "$stage/usr/share/applications/claude-revoke.desktop"
     chmod 644 "$stage/usr/share/applications/claude-revoke.desktop"
     # systemd user units for the scheduled audit (off until the user enables them)
+    install -d -m 755 "$stage/usr/lib/systemd/user"
     put packaging/claude-revoke-audit.timer /usr/lib/systemd/user/claude-revoke-audit.timer 644
     sed -e 's|@BIN@|/usr/bin/claude-revoke|' "$root/packaging/claude-revoke-audit.service.in" \
         > "$stage/usr/lib/systemd/user/claude-revoke-audit.service"

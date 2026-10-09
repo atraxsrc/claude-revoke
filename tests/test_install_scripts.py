@@ -22,14 +22,25 @@ class TestInstallScripts(unittest.TestCase):
         stub.chmod(0o755)
         # stubs come first so systemctl is ours; the rest of PATH supplies python3, install, sed
         self.env = dict(os.environ, HOME=str(self.home), SYSTEMCTL_LOG=str(self.log),
-                        PATH=f"{stubs}:{os.environ.get('PATH', '/usr/bin:/bin')}")
+                        PATH=f"{stubs}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+                        XDG_CONFIG_HOME=str(self.home / ".config"))
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_script(self, name):
-        return subprocess.run(["bash", str(ROOT / name)], env=self.env,
+    def run_script(self, name, **env):
+        return subprocess.run(["bash", str(ROOT / name)], env=dict(self.env, **env),
                               capture_output=True, text=True, timeout=60)
+
+    def test_units_follow_xdg_config_home(self):
+        cfg = self.home / "cfg"
+        r = self.run_script("install.sh", XDG_CONFIG_HOME=str(cfg))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((cfg / "systemd/user/claude-revoke-audit.timer").is_file())
+        self.assertFalse((self.home / UNITS).exists())
+        r = self.run_script("uninstall.sh", XDG_CONFIG_HOME=str(cfg))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((cfg / "systemd/user/claude-revoke-audit.timer").exists())
 
     def calls(self):
         return self.log.read_text().splitlines() if self.log.exists() else []
@@ -51,10 +62,16 @@ class TestInstallScripts(unittest.TestCase):
         self.assertIn("--schedule weekly", r.stdout)
 
     def test_uninstall_removes_everything_and_stops_the_timer(self):
-        self.run_script("install.sh")
-        dropin = self.home / UNITS / "claude-revoke-audit.timer.d"
+        r = self.run_script("install.sh")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        units = self.home / UNITS
+        dropin = units / "claude-revoke-audit.timer.d"
         dropin.mkdir(parents=True)
         (dropin / "schedule.conf").write_text("[Timer]\nOnCalendar=\nOnCalendar=daily\n")
+        # what `systemctl --user enable` leaves behind
+        wants = units / "timers.target.wants"
+        wants.mkdir()
+        (wants / "claude-revoke-audit.timer").symlink_to(units / "claude-revoke-audit.timer")
         r = self.run_script("uninstall.sh")
         self.assertEqual(r.returncode, 0, r.stderr)
         for rel in (".local/bin/claude-revoke",
@@ -62,8 +79,9 @@ class TestInstallScripts(unittest.TestCase):
                     ".local/share/icons/hicolor/scalable/apps/claude-revoke.svg",
                     f"{UNITS}/claude-revoke-audit.service",
                     f"{UNITS}/claude-revoke-audit.timer",
-                    f"{UNITS}/claude-revoke-audit.timer.d"):
-            self.assertFalse((self.home / rel).exists(), rel)
+                    f"{UNITS}/claude-revoke-audit.timer.d",
+                    f"{UNITS}/timers.target.wants/claude-revoke-audit.timer"):
+            self.assertFalse((self.home / rel).is_symlink() or (self.home / rel).exists(), rel)
         self.assertIn("--user disable --now claude-revoke-audit.timer", self.calls())
 
 

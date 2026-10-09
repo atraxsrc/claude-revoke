@@ -46,7 +46,7 @@ sudo dnf install ./claude-revoke-*.rpm          # Fedora
 sudo pacman -U ./claude-revoke-*.pkg.tar.zst    # Arch
 ```
 
-This installs the `claude-revoke` command and a **Claude Revoke** launcher entry that opens in your desktop's default terminal. `SHA256SUMS` on the release page lets you check the download. Remove with `sudo apt remove claude-revoke`, `sudo dnf remove claude-revoke` or `sudo pacman -R claude-revoke`.
+This installs the `claude-revoke` command and a **Claude Revoke** launcher entry that opens in your desktop's default terminal. `SHA256SUMS` on the release page lets you check the download. Remove with `sudo apt remove claude-revoke`, `sudo dnf remove claude-revoke` or `sudo pacman -R claude-revoke`; if you turned on the scheduled audit, run `claude-revoke --schedule off` first.
 
 If you installed from source before, run `./uninstall.sh` first. Otherwise the old copy in `~/.local/bin` keeps shadowing the package, and upgrades seem to do nothing.
 
@@ -102,9 +102,9 @@ Let it check for you and only speak up when something needs a look:
 claude-revoke --schedule weekly        # or daily; "off" turns it back off
 ```
 
-Once a week a systemd user timer runs `claude-revoke --notify`: the same scan as `--report`, then a desktop notification such as "Trusted projects: 2 stale, 1 risky; Session transcripts: 1 risky (1 with secrets). Run claude-revoke to review." Nothing found, nothing shown. It never changes anything; revoking stays a decision you make in the UI.
+Once a week a systemd user timer runs `claude-revoke --notify`: the same scan as `--report`, then a desktop notification such as "Trusted projects: 2 stale, 1 risky; Session transcripts: 1 with secrets. Run claude-revoke to review." You get one notification per change; while the situation stays the same it is only logged. Nothing found, nothing shown. It never changes anything; revoking stays a decision you make in the UI.
 
-Under the hood: `claude-revoke-audit.timer` and `.service` (shipped by the packages in `/usr/lib/systemd/user/`, by `install.sh` in `~/.config/systemd/user/`), a drop-in with your chosen interval, and `notify-send` for the notification (`libnotify-bin` on Debian and Ubuntu, `libnotify` elsewhere). Useful commands:
+Under the hood: `claude-revoke-audit.timer` and `.service` (shipped by the packages in `/usr/lib/systemd/user/`, by `install.sh` in `~/.config/systemd/user/`), a drop-in with your chosen interval, and `notify-send` for the notification (`libnotify-bin` on Debian and Ubuntu, `libnotify` elsewhere). The scheduled run uses the default options (whole home, secret scan on); `systemctl --user edit claude-revoke-audit.service` changes that. Useful commands:
 
 ```bash
 systemctl --user status claude-revoke-audit.timer     # when it runs next
