@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Claude Revoke
+GenericName=Agent Access Auditor
+Comment=Audit and revoke Claude Code access to your folders
+Exec=@TERM@ @BIN@
+Icon=claude-revoke
+Terminal=false
+Categories=System;Security;Utility;
+Keywords=claude;revoke;permissions;audit;security;privacy;
