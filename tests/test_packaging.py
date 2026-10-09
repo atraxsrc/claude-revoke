@@ -30,9 +30,25 @@ SOURCES = ["claude_revoke.py", "assets/logo.svg", "README.md", "CHANGELOG.md", "
            "packaging/build.sh", "packaging/claude-revoke.desktop.in", "packaging/nfpm.yaml"]
 
 
-def run_build(script, *args, env=None, timeout=60):
+def run_build(script, *args, env=None, cwd=None, timeout=60):
     return subprocess.run(["bash", str(script), *args], env=dict(os.environ, **(env or {})),
-                          capture_output=True, text=True, timeout=timeout)
+                          cwd=cwd, capture_output=True, text=True, timeout=timeout)
+
+
+# A stand-in for nfpm: writes an empty package with the real naming scheme into
+# --target, so the whole build step can be exercised without network or nfpm.
+STUB_NFPM = r"""#!/usr/bin/env bash
+while [ $# -gt 0 ]; do
+    case "$1" in --packager) p="$2"; shift ;; --target) t="$2"; shift ;; esac
+    shift
+done
+case "$p" in
+    deb) f="claude-revoke_${VERSION}-1_all.deb" ;;
+    rpm) f="claude-revoke-${VERSION}-1.noarch.rpm" ;;
+    archlinux) f="claude-revoke-${VERSION}-1-any.pkg.tar.zst" ;;
+esac
+: > "$t/$f"
+"""
 
 
 def copy_sources(dest, skip=()):
@@ -144,6 +160,50 @@ class TestBuildFailures(unittest.TestCase):
         tools = self.tree / "dist" / "tools"
         self.assertEqual(list(tools.glob("*.tar.gz")) if tools.exists() else [], [])
         self.assertFalse((tools / "nfpm").exists())
+
+
+class TestBuildOutputFolder(unittest.TestCase):
+    """The documented DIST override must not touch files that are not ours."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tree = Path(self.tmp.name)
+        self.script = copy_sources(self.tree)
+        stub = self.tree / "stub-nfpm"
+        stub.write_text(STUB_NFPM)
+        stub.chmod(0o755)
+        self.env = {"NFPM": str(stub)}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_keeps_unrelated_packages_in_dist(self):
+        out = self.tree / "out"
+        out.mkdir()
+        (out / "other-app_1.0_amd64.deb").write_text("keep me")
+        (out / "other.rpm").write_text("keep me")
+        r = run_build(self.script, env={**self.env, "DIST": str(out)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((out / "other-app_1.0_amd64.deb").read_text(), "keep me")
+        self.assertEqual((out / "other.rpm").read_text(), "keep me")
+        sums = (out / "SHA256SUMS").read_text()
+        self.assertNotIn("other", sums)
+        self.assertEqual(len(sums.splitlines()), 3)
+
+    def test_replaces_our_older_packages_in_dist(self):
+        out = self.tree / "out"
+        out.mkdir()
+        (out / "claude-revoke_0.0.1-1_all.deb").write_text("stale")
+        r = run_build(self.script, env={**self.env, "DIST": str(out)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((out / "claude-revoke_0.0.1-1_all.deb").exists())
+        self.assertEqual(len(list(out.glob("claude-revoke*"))), 3)
+
+    def test_relative_dist_is_resolved_from_the_current_directory(self):
+        r = run_build(self.script, env={**self.env, "DIST": "out"}, cwd=self.tree)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(list((self.tree / "out").glob("claude-revoke*"))), 3)
+        self.assertTrue((self.tree / "out" / "SHA256SUMS").is_file())
 
 
 if __name__ == "__main__":
