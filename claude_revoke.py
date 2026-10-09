@@ -34,7 +34,7 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # CLAUDE_REVOKE_HOME lets you point the tool at a test home folder.
 HOME = Path(os.environ.get("CLAUDE_REVOKE_HOME", str(Path.home()))).expanduser()
