@@ -26,6 +26,13 @@ sed -e "s|@TERM@|$term|" -e "s|@BIN@|$bin/claude-revoke|" \
     "$here/packaging/claude-revoke.desktop.in" > "$apps/claude-revoke.desktop"
 command -v update-desktop-database >/dev/null && update-desktop-database "$apps" 2>/dev/null || true
 
+# systemd user units for the optional scheduled audit (off until you enable it)
+units="$HOME/.config/systemd/user"
+mkdir -p "$units"
+sed -e "s|@BIN@|$bin/claude-revoke|" "$here/packaging/claude-revoke-audit.service.in" > "$units/claude-revoke-audit.service"
+install -m 644 "$here/packaging/claude-revoke-audit.timer" "$units/claude-revoke-audit.timer"
+command -v systemctl >/dev/null && systemctl --user daemon-reload 2>/dev/null || true
+
 echo "Installed: $bin/claude-revoke"
 echo "Launcher:  'Claude Revoke' (opens in: ${term%% *})"
 case ":$PATH:" in
@@ -34,3 +41,4 @@ case ":$PATH:" in
 esac
 echo
 echo "Start with a safe look:  claude-revoke --report"
+echo "Weekly check, optional:  claude-revoke --schedule weekly"
