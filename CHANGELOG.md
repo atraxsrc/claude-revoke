@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Fix: rewriting `~/.claude.json` or `~/.claude/settings.json` no longer loosens their permissions (a `0600` file stayed `0600`, new files are created `0600`).
-- Fix: the quarantine folder is now owner-only (`0700`), since it holds transcripts and config backups.
+- Fix: the quarantine folder and the folders inside it are now owner-only (`0700`), since they hold transcripts and config backups.
 - Fix: projects inside folders named `dev`, `run`, `sys` or `proc` are found again. Those names are now only skipped directly under `/`.
 - Fix: the scan no longer walks `~/.cache`, `~/.local`, `~/snap` and other skipped folders at the top of your home, so it is faster.
 - Fix: `--restore` now puts back only the entries that run removed, into the file as it is now, so anything Claude Code wrote after the run is kept. The full backup is still used when the file is missing or unreadable, and for 0.1.0 quarantine folders.

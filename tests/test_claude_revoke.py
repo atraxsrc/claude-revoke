@@ -93,12 +93,17 @@ class TestFilePermissions(FakeHome):
         self.assertEqual(mode(p), 0o600)
 
     def test_quarantine_folders_are_private(self):
-        self.write(".claude/settings.json", {"permissions": {"allow": ["Bash(*)"]}}, perms=0o600)
-        plan = [i for i in cr.scan_global({}) if i.kind == "gallow"]
-        cr.apply_plan(plan)
-        self.assertEqual(mode(cr.QUARANTINE_ROOT), 0o700)
-        for qdir in cr.QUARANTINE_ROOT.iterdir():
-            self.assertEqual(mode(qdir), 0o700)
+        # every folder the tool creates: root, the run folder and backup/sessions/settings inside it
+        self.write(".claude.json", {"projects": {"/gone/app": {}}}, perms=0o600)
+        self.write("code/app/.claude/settings.local.json", {})
+        sess = self.home / ".claude/projects/-gone-app"
+        sess.mkdir()
+        (sess / "a.jsonl").write_text("{}\n")
+        cats = cr.scan_all([self.home], secret_scan=False)
+        cr.apply_plan([i for c in cats for i in c.items if i.kind in ("trust", "session", "settings")])
+        qdir = self.latest_quarantine()
+        for d in (cr.QUARANTINE_ROOT, qdir, qdir / "backup", qdir / "sessions", qdir / "settings"):
+            self.assertEqual(mode(d), 0o700, d)
 
     def test_existing_loose_quarantine_root_is_tightened(self):
         cr.QUARANTINE_ROOT.mkdir(mode=0o775)

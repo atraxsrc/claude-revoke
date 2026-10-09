@@ -123,7 +123,6 @@ python3 -m unittest discover -s tests   # runs against a temporary fake home fol
 - [ ] `.deb` package and Pop!_OS install via a PPA
 - [ ] Support for other agents (Codex CLI, Gemini CLI, Cursor)
 - [ ] Scheduled audits with a desktop notification
-- [ ] Improvements 
 
 ## License
 

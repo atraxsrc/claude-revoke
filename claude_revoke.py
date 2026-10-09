@@ -512,7 +512,7 @@ def apply_plan(plan):
     def backup(p):
         if p.exists():
             dest = qdir / "backup" / p.name
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             shutil.copy2(p, dest)
             manifest["backups"].append({"original": str(p), "copy": str(dest)})
 
@@ -579,7 +579,7 @@ def apply_plan(plan):
         for it in by.get(kind, []):
             src = Path(it.key)
             dest = qdir / sub / encode_path(it.key)
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             try:
                 shutil.move(str(src), str(dest))
                 manifest["moves"].append({"original": str(src), "quarantined": str(dest)})
