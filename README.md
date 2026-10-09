@@ -37,7 +37,7 @@ Every time you run Claude Code in a folder and click **"Always allow"**, it reme
 ## Install (Pop!_OS / Ubuntu / Debian)
 
 ```bash
-git clone https://github.com/<you>/claude-revoke.git
+git clone https://github.com/atraxsrc/claude-revoke
 cd claude-revoke
 ./install.sh
 ```
