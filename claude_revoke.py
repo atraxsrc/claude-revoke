@@ -14,6 +14,8 @@ Usage:
   ./claude_revoke.py --dry-run        TUI, but "apply" changes nothing
   ./claude_revoke.py --restore DIR    undo a previous run from its quarantine folder
   ./claude_revoke.py --roots ~ /srv   folders to search for per-project settings
+  ./claude_revoke.py --notify         scan and send a desktop notification if anything needs a look
+  ./claude_revoke.py --schedule weekly   run --notify on a systemd user timer (weekly | daily | off)
 
 Needs only the Python 3 standard library. Close all Claude Code sessions
 before applying changes (it rewrites ~/.claude.json while running).
@@ -25,6 +27,7 @@ import math
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -682,6 +685,60 @@ def print_report(cats, only="all"):
     print("\nLegend: ! risky   ~ stale (folder gone).  Run without --report to revoke.")
 
 
+# --------------------------------------------------------------------------- scheduled audit
+TIMER = "claude-revoke-audit.timer"
+
+
+def summarize(cats):
+    """One line naming what needs attention per category, or None when nothing does."""
+    bits = []
+    for c in cats:
+        stale = sum(1 for i in c.items if i.stale)
+        risky = sum(1 for i in c.items if i.risky)
+        secrets = sum(1 for i in c.items if i.kind == "session" and "SECRETS:" in i.badge)
+        what = []
+        if stale:
+            what.append(f"{stale} stale")
+        if risky:
+            what.append(f"{risky} risky" + (f" ({secrets} with secrets)" if secrets else ""))
+        if what:
+            bits.append(f"{c.name}: {', '.join(what)}")
+    return "; ".join(bits) or None
+
+
+def send_notification(summary):
+    """Desktop notification through notify-send. Returns False when it is not installed."""
+    if not shutil.which("notify-send"):
+        return False
+    subprocess.run(["notify-send", "--app-name=claude-revoke", "--icon=claude-revoke",
+                    "Claude Code access needs a look", summary + "\nRun claude-revoke to review."],
+                   check=False)
+    return True
+
+
+def schedule(choice):
+    """Turn the systemd user timer on (weekly or daily) or off. Returns an exit status."""
+    if not shutil.which("systemctl"):
+        print("systemctl not found: scheduled audits need a systemd user session.", file=sys.stderr)
+        return 1
+    if choice == "off":
+        code = subprocess.run(["systemctl", "--user", "disable", "--now", TIMER]).returncode
+        if code == 0:
+            print("Scheduled audit: off")
+        return code
+    # A drop-in overrides the OnCalendar= shipped in the timer unit.
+    dropin = HOME / ".config" / "systemd" / "user" / (TIMER + ".d")
+    dropin.mkdir(parents=True, exist_ok=True)
+    (dropin / "schedule.conf").write_text(f"[Timer]\nOnCalendar=\nOnCalendar={choice}\n")
+    subprocess.run(["systemctl", "--user", "daemon-reload"])
+    code = subprocess.run(["systemctl", "--user", "enable", "--now", TIMER]).returncode
+    if code == 0:
+        print(f"Scheduled audit: {choice}  (check with: systemctl --user status {TIMER})")
+    else:
+        print(f"Could not enable {TIMER}. Installed from source? Run ./install.sh first.", file=sys.stderr)
+    return code
+
+
 # --------------------------------------------------------------------------- TUI
 class App:
     def __init__(self, scr, cats, dry_run):
@@ -998,6 +1055,11 @@ def main():
     ap.add_argument("--no-secret-scan", action="store_true", help="skip scanning transcripts for secrets")
     ap.add_argument("--pause", action="store_true",
                     help="wait for Enter before exiting (keeps a launcher-opened terminal window open)")
+    ap.add_argument("--notify", action="store_true",
+                    help="scan, print a one-line summary and send a desktop notification if anything "
+                         "is stale or risky (what the scheduled audit runs)")
+    ap.add_argument("--schedule", choices=["weekly", "daily", "off"],
+                    help="turn the scheduled audit (a systemd user timer) on at that interval, or off")
     ap.add_argument("--version", action="version", version=f"claude-revoke {__version__}")
     args = ap.parse_args()
     if not args.pause:
@@ -1032,11 +1094,23 @@ def run(args, ap):
     except ValueError as e:
         ap.error(str(e))
 
+    if args.schedule:
+        sys.exit(schedule(args.schedule))
     if args.restore:
         restore(args.restore)
         return
     print("Scanning Claude Code footprint (this can take a minute on a big home folder)...", file=sys.stderr)
     cats = scan_all(args.roots, not args.no_secret_scan)
+    if args.notify:
+        summary = summarize(cats)
+        if summary is None:
+            print("claude-revoke: nothing stale or risky found.")
+            return
+        print("claude-revoke: " + summary)
+        if not send_notification(summary):
+            print("notify-send not found: install libnotify-bin (Debian/Ubuntu) or libnotify "
+                  "to get desktop notifications.", file=sys.stderr)
+        return
     if args.report:
         print_report(cats, args.only)
         return
