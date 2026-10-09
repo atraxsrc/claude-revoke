@@ -1,0 +1,58 @@
+# One description of the package; packaging/build.sh turns it into .deb, .rpm
+# and Arch packages. build.sh sets VERSION and runs nfpm from dist/stage/, so
+# every src below is relative to that staged tree.
+name: claude-revoke
+arch: all
+platform: linux
+version: ${VERSION}
+release: "1"
+section: utils
+priority: optional
+maintainer: atraxsrc <92285717+atraxsrc@users.noreply.github.com>
+vendor: atraxsrc
+homepage: https://github.com/atraxsrc/claude-revoke
+license: MIT
+description: |
+  Audit and revoke Claude Code access on Linux.
+  An installer-style terminal UI in reverse: it shows every folder Claude
+  Code was trusted with, every "always allow" rule, extra directory, saved
+  transcript, hook and MCP server, lets you tick what to remove, and
+  quarantines it instead of deleting so a run can be undone.
+depends:
+  - python3 (>= 3.8)
+contents:
+  - src: usr/bin/claude-revoke
+    dst: /usr/bin/claude-revoke
+    file_info:
+      mode: 0755
+  - src: usr/share/applications/claude-revoke.desktop
+    dst: /usr/share/applications/claude-revoke.desktop
+    file_info:
+      mode: 0644
+  - src: usr/share/icons/hicolor/scalable/apps/claude-revoke.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/claude-revoke.svg
+    file_info:
+      mode: 0644
+  - src: usr/share/doc/claude-revoke/README.md
+    dst: /usr/share/doc/claude-revoke/README.md
+    file_info:
+      mode: 0644
+  - src: usr/share/doc/claude-revoke/CHANGELOG.md
+    dst: /usr/share/doc/claude-revoke/CHANGELOG.md
+    file_info:
+      mode: 0644
+  - src: usr/share/doc/claude-revoke/LICENSE
+    dst: /usr/share/doc/claude-revoke/LICENSE
+    file_info:
+      mode: 0644
+  - src: usr/share/doc/claude-revoke/copyright
+    dst: /usr/share/doc/claude-revoke/copyright
+    file_info:
+      mode: 0644
+overrides:
+  rpm:
+    depends:
+      - python3 >= 3.8
+  archlinux:
+    depends:
+      - python

@@ -105,5 +105,46 @@ class TestStageFailures(unittest.TestCase):
         self.assertIn("__version__", r.stderr)
 
 
+class TestNfpmConfig(unittest.TestCase):
+    def setUp(self):
+        self.text = (ROOT / "packaging" / "nfpm.yaml").read_text()
+
+    def test_every_src_in_nfpm_yaml_is_staged(self):
+        srcs = re.findall(r"^\s*-\s*src:\s*(\S+)\s*$", self.text, re.M)
+        self.assertEqual(sorted(srcs), sorted(STAGED))
+
+    def test_dst_matches_src_under_root(self):
+        pairs = re.findall(r"src:\s*(\S+)\s*\n\s*dst:\s*(\S+)", self.text)
+        self.assertEqual(len(pairs), len(STAGED))
+        for src, dst in pairs:
+            self.assertEqual(dst, "/" + src)
+
+    def test_version_comes_from_the_environment(self):
+        self.assertIn("version: ${VERSION}", self.text)
+
+
+class TestBuildFailures(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tree = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_build_aborts_on_nfpm_checksum_mismatch(self):
+        script = copy_sources(self.tree)
+        fake = self.tree / "fake-nfpm.tar.gz"
+        fake.write_bytes(b"not a real archive")
+        env = {"PATH": "/usr/bin:/bin",            # no nfpm on PATH, so the download path is taken
+               "NFPM_URL": fake.as_uri(),
+               "NFPM_SHA256": "0" * 64}
+        r = run_build(script, env=env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("checksum", r.stderr.lower())
+        tools = self.tree / "dist" / "tools"
+        self.assertEqual(list(tools.glob("*.tar.gz")) if tools.exists() else [], [])
+        self.assertFalse((tools / "nfpm").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
