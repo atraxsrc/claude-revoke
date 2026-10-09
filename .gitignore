@@ -4,3 +4,4 @@ __pycache__/
 .claude-revoke-quarantine/
 dist/
 .superpowers/
+.claude/
