@@ -31,6 +31,8 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
+__version__ = "0.2.0"
+
 # CLAUDE_REVOKE_HOME lets you point the tool at a test home folder.
 HOME = Path(os.environ.get("CLAUDE_REVOKE_HOME", str(Path.home()))).expanduser()
 CLAUDE_JSON = HOME / ".claude.json"
@@ -996,6 +998,7 @@ def main():
     ap.add_argument("--no-secret-scan", action="store_true", help="skip scanning transcripts for secrets")
     ap.add_argument("--pause", action="store_true",
                     help="wait for Enter before exiting (keeps a launcher-opened terminal window open)")
+    ap.add_argument("--version", action="version", version=f"claude-revoke {__version__}")
     args = ap.parse_args()
     if not args.pause:
         run(args, ap)

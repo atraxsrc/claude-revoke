@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-10-10
 
 - Fix: rewriting `~/.claude.json` or `~/.claude/settings.json` no longer loosens their permissions (a `0600` file stayed `0600`, new files are created `0600`).
 - Fix: the quarantine folder and the folders inside it are now owner-only (`0700`), since they hold transcripts and config backups.

@@ -365,5 +365,17 @@ class TestPauseFlag(FakeHome):
         self.assertIn("--pause", exec_line)
 
 
+class TestVersion(unittest.TestCase):
+    def test_version_flag(self):
+        r = subprocess.run([sys.executable, str(SCRIPT), "--version"],
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), f"claude-revoke {cr.__version__}")
+
+    def test_changelog_top_entry_matches_version(self):
+        heads = [l for l in (ROOT / "CHANGELOG.md").read_text().splitlines() if l.startswith("## ")]
+        self.assertTrue(heads[0].startswith(f"## {cr.__version__} - "), heads[0])
+
+
 if __name__ == "__main__":
     unittest.main()

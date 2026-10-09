@@ -60,6 +60,7 @@ claude-revoke                          # the real thing (close Claude Code first
 claude-revoke --restore ~/.claude-revoke-quarantine/<timestamp>
 claude-revoke --roots ~/code ~/work    # limit where it searches for project settings
 claude-revoke --pause                  # wait for Enter before closing (the launcher entry uses this)
+claude-revoke --version                # print the version
 ```
 
 ### Keys
