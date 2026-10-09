@@ -31,7 +31,7 @@ Every time you run Claude Code in a folder and click **"Always allow"**, it reme
 - **Zero dependencies**: a single Python file using the standard library.
 
 <p align="center">
-  <img src="assets/screenshot-menu.svg" alt="Main menu" width="92%">
+  <img src="assets/screenshot-transcripts.svg" alt="Session transcripts with secret scan results" width="92%">
 </p>
 
 ## Install
@@ -93,6 +93,10 @@ claude-revoke --notify                 # what the scheduled check runs: scan, su
 | `v` | View: all → stale → risky → selected |
 | `/` | Search by folder name |
 | `Esc` / `q` | Back / quit |
+
+<p align="center">
+  <img src="assets/screenshot-menu.svg" alt="Main menu" width="92%">
+</p>
 
 ## Scheduled audits
 
