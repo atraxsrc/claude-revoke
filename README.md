@@ -34,7 +34,21 @@ Every time you run Claude Code in a folder and click **"Always allow"**, it reme
   <img src="assets/screenshot-menu.svg" alt="Main menu" width="92%">
 </p>
 
-## Install (Pop!_OS / Ubuntu / Debian)
+## Install
+
+### Packages (Debian, Ubuntu, Pop!_OS, Fedora, Arch)
+
+Download the file for your distro from the [latest release](https://github.com/atraxsrc/claude-revoke/releases/latest), then:
+
+```bash
+sudo apt install ./claude-revoke_*.deb          # Debian, Ubuntu, Pop!_OS
+sudo dnf install ./claude-revoke-*.rpm          # Fedora
+sudo pacman -U ./claude-revoke-*.pkg.tar.zst    # Arch
+```
+
+This installs the `claude-revoke` command and a **Claude Revoke** launcher entry that opens in your desktop's default terminal. `SHA256SUMS` on the release page lets you check the download. Remove with `sudo apt remove claude-revoke`, `sudo dnf remove claude-revoke` or `sudo pacman -R claude-revoke`.
+
+### From source (any distro)
 
 ```bash
 git clone https://github.com/atraxsrc/claude-revoke
@@ -42,7 +56,7 @@ cd claude-revoke
 ./install.sh
 ```
 
-This installs the `claude-revoke` command into `~/.local/bin` and adds a **Claude Revoke** entry to the COSMIC launcher (Super, then type "revoke"). Remove both with `./uninstall.sh`.
+This installs the `claude-revoke` command into `~/.local/bin` and adds a **Claude Revoke** entry to the COSMIC launcher (Super, then type "revoke"), opening in COSMIC Terminal when it is installed. Remove both with `./uninstall.sh`.
 
 To run it without installing:
 
@@ -117,13 +131,13 @@ Claude Code's file layout can change between versions. Run `--report` first and 
 
 ```bash
 python3 -m unittest discover -s tests   # runs against a temporary fake home folder
+packaging/build.sh                      # builds the .deb, .rpm and Arch packages into dist/
 ```
 
 ## Roadmap
 
-- [ ] `.deb` package and Pop!_OS install via a PPA
-- [ ] Support for other agents (Codex CLI, Gemini CLI, Cursor)
 - [ ] Scheduled audits with a desktop notification
+- [ ] AUR and COPR packages if people ask for them
 
 ## License
 
