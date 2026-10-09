@@ -20,6 +20,8 @@ description: |
   quarantines it instead of deleting so a run can be undone.
 depends:
   - python3 (>= 3.8)
+recommends:
+  - libnotify-bin          # notify-send, for the scheduled audit's desktop notification
 contents:
   - src: usr/bin/claude-revoke
     dst: /usr/bin/claude-revoke
@@ -49,10 +51,21 @@ contents:
     dst: /usr/share/doc/claude-revoke/copyright
     file_info:
       mode: 0644
+  - src: usr/lib/systemd/user/claude-revoke-audit.service
+    dst: /usr/lib/systemd/user/claude-revoke-audit.service
+    file_info:
+      mode: 0644
+  - src: usr/lib/systemd/user/claude-revoke-audit.timer
+    dst: /usr/lib/systemd/user/claude-revoke-audit.timer
+    file_info:
+      mode: 0644
 overrides:
   rpm:
     depends:
       - python3 >= 3.8
+    recommends:
+      - libnotify
   archlinux:
     depends:
       - python
+    recommends: []

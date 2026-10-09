@@ -1,0 +1,12 @@
+# Runs one scheduled audit: scan, one-line summary in the journal, desktop
+# notification if anything is stale or risky. Never changes anything.
+# Started by claude-revoke-audit.timer; @BIN@ is filled in by build.sh or install.sh.
+[Unit]
+Description=claude-revoke audit of Claude Code access
+Documentation=https://github.com/atraxsrc/claude-revoke
+
+[Service]
+Type=oneshot
+ExecStart=@BIN@ --notify
+Nice=19
+IOSchedulingClass=idle

@@ -1,0 +1,12 @@
+# Scheduled audit. Off until enabled: `claude-revoke --schedule weekly` (or
+# daily / off), which also writes a drop-in overriding OnCalendar= below.
+[Unit]
+Description=Scheduled claude-revoke audit of Claude Code access
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
