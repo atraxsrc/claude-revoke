@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -v
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: echo "version=$(sed -n 's/^__version__ = "\([^"]*\)"$/\1/p' claude_revoke.py)" >> "$GITHUB_OUTPUT"
+      - run: packaging/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:stable
+            install: apt-get update -qq && apt-get install -y -qq --no-install-recommends ./dist/*.deb desktop-file-utils
+          - image: fedora:latest
+            install: dnf install -y ./dist/*.rpm desktop-file-utils
+          - image: archlinux:latest
+            install: pacman -Sy --noconfirm && pacman -U --noconfirm ./dist/*.pkg.tar.zst && pacman -S --noconfirm desktop-file-utils
+    container: ${{ matrix.image }}
+    env:
+      EXPECTED: claude-revoke ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist
+      - name: Install the package
+        run: ${{ matrix.install }}
+      - name: Run the installed tool
+        run: |
+          actual="$(claude-revoke --version)"
+          [ "$actual" = "$EXPECTED" ] || { echo "got '$actual', want '$EXPECTED'"; exit 1; }
+          mkdir -p /tmp/empty-home
+          HOME=/tmp/empty-home claude-revoke --report --no-secret-scan
+          desktop-file-validate /usr/share/applications/claude-revoke.desktop
+          cd dist && sha256sum -c SHA256SUMS
+
+  publish:
+    if: github.event_name == 'release'
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist
+      - name: Check the release tag matches __version__
+        run: |
+          want="v$(sed -n 's/^__version__ = "\([^"]*\)"$/\1/p' claude_revoke.py)"
+          [ "$TAG" = "$want" ] || { echo "release tag $TAG does not match $want"; exit 1; }
+      - name: Attach the packages to the release
+        run: gh release upload "$TAG" dist/* --clobber
