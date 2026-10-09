@@ -21,11 +21,13 @@ before applying changes (it rewrites ~/.claude.json while running).
 import argparse
 import curses
 import json
+import math
 import os
 import re
 import shutil
 import sys
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -70,15 +72,19 @@ DENY_RULES = [
     "Read(**/*.key)", "Read(**/id_rsa*)", "Read(**/id_ed25519*)",
 ]
 
+# Group "v" is the secret value itself (what gets redacted and entropy-checked).
 SECRET_RX = {
-    "AWS key": re.compile(r"AKIA[0-9A-Z]{16}"),
-    "private key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    "GitHub token": re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}"),
-    "API key (sk-)": re.compile(r"sk-(?:ant-|proj-)?[A-Za-z0-9_\-]{20,}"),
-    "Slack token": re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),
+    "AWS key": re.compile(r"(?P<v>AKIA[0-9A-Z]{16})"),
+    "private key": re.compile(r"(?P<v>-----BEGIN [A-Z ]*PRIVATE KEY-----)"),
+    "GitHub token": re.compile(r"(?P<v>gh[pousr]_[A-Za-z0-9]{36,})"),
+    "API key (sk-)": re.compile(r"(?P<v>sk-(?:ant-|proj-)?[A-Za-z0-9_\-]{20,})"),
+    "Slack token": re.compile(r"(?P<v>xox[baprs]-[A-Za-z0-9-]{10,})"),
     "secret assignment": re.compile(
-        r"(?i)(api[_-]?key|secret|token|passw(?:or)?d)[\\\"']*\s*[:=]\s*[\\\"']*[A-Za-z0-9_\-/+]{12,}"),
+        r"(?i)(api[_-]?key|secret|token|passw(?:or)?d)[\\\"']*\s*[:=]\s*[\\\"']*(?P<v>[A-Za-z0-9_\-/+]{12,})"),
 }
+# Fixed-format matches that need no "does this look random" check.
+NO_ENTROPY_CHECK = {"AWS key", "private key"}
+PLACEHOLDER_WORDS = ("example", "placeholder", "your_", "your-", "xxxx", "changeme", "redacted", "dummy")
 
 
 # --------------------------------------------------------------------------- model
@@ -108,6 +114,14 @@ class Category:
     items: list
 
 
+@dataclass
+class Secret:
+    kind: str
+    file: str          # transcript file, relative to the project's transcripts folder
+    line: int
+    redacted: str      # e.g. "password=p4ss...(19 chars)"
+
+
 # --------------------------------------------------------------------------- helpers
 def load_json(p):
     try:
@@ -115,6 +129,19 @@ def load_json(p):
             return json.load(fh)
     except (OSError, ValueError):
         return None
+
+
+# Claude Code's files are hand-editable, so any key can hold the wrong type.
+def as_dict(v):
+    return v if isinstance(v, dict) else {}
+
+
+def as_list(v):
+    return v if isinstance(v, list) else []
+
+
+def str_list(v):
+    return [x for x in as_list(v) if isinstance(x, str)]
 
 
 def write_json_atomic(p, data):
@@ -187,36 +214,73 @@ def analyze_settings(data):
     if not isinstance(data, dict):
         return ["unreadable or invalid JSON"], 0
     risks = []
-    perms = data.get("permissions") or {}
-    allow = [r for r in perms.get("allow") or [] if isinstance(r, str)]
+    perms = as_dict(data.get("permissions"))
+    allow = str_list(perms.get("allow"))
     if perms.get("defaultMode") == "bypassPermissions":
         risks.append("bypassPermissions mode: no prompts at all")
     for r in allow:
         if is_broad(r):
             risks.append(f"broad allow rule: {r}")
-    for d in perms.get("additionalDirectories") or []:
+    for d in as_list(perms.get("additionalDirectories")):
         risks.append(f"extra directory granted: {d}")
     hooks = data.get("hooks")
     if hooks:
         events = ", ".join(hooks.keys()) if isinstance(hooks, dict) else "?"
         risks.append(f"hooks that run commands automatically: {events}")
-    if data.get("mcpServers"):
-        risks.append("defines MCP servers: " + ", ".join(data["mcpServers"].keys()))
+    mcp = data.get("mcpServers")
+    if mcp:
+        risks.append("defines MCP servers: " + (", ".join(mcp.keys()) if isinstance(mcp, dict) else "?"))
     if data.get("enableAllProjectMcpServers"):
         risks.append("auto-enables all project MCP servers")
     return risks, len(allow)
 
 
-def scan_secrets(d, max_bytes=300 * 1024 * 1024):
-    hits, read = {}, 0
+def looks_random(v):
+    """Real credentials mix letters and digits and have high entropy;
+    identifiers like generateTokenForUser or your_password_here do not."""
+    if not (re.search(r"[0-9]", v) and re.search(r"[A-Za-z]", v)):
+        return False
+    counts = {}
+    for ch in v:
+        counts[ch] = counts.get(ch, 0) + 1
+    n = len(v)
+    entropy = -sum(c / n * math.log2(c / n) for c in counts.values())
+    return entropy >= 3.0
+
+
+def plausible_secret(kind, v):
+    low = v.lower()
+    if any(w in low for w in PLACEHOLDER_WORDS):
+        return False
+    return kind in NO_ENTROPY_CHECK or looks_random(v)
+
+
+def redact(kind, m):
+    v = m.group("v")
+    if kind == "private key":       # the header line is not the secret
+        return v
+    # keep what led up to the value (e.g. "password=") and its first 4 chars
+    prefix = m.group(0)[: m.start("v") - m.start(0)]
+    return f"{prefix}{v[:4]}...({len(v)} chars)"
+
+
+def scan_secrets(d, max_bytes=300 * 1024 * 1024, max_hits=500):
+    """One Secret per distinct credential-looking value in d's transcripts, with where it was first seen."""
+    hits, seen, read = [], set(), 0
     for f in sorted(d.rglob("*.jsonl")):
         try:
             with open(f, "r", encoding="utf-8", errors="ignore") as fh:
-                for line in fh:
+                for n, line in enumerate(fh, 1):
                     read += len(line)
-                    for name, rx in SECRET_RX.items():
-                        if rx.search(line):
-                            hits[name] = hits.get(name, 0) + 1
+                    for kind, rx in SECRET_RX.items():
+                        for m in rx.finditer(line):
+                            v = m.group("v")
+                            if (kind, v) in seen or not plausible_secret(kind, v):
+                                continue
+                            seen.add((kind, v))
+                            hits.append(Secret(kind, f.relative_to(d).as_posix(), n, redact(kind, m)))
+                            if len(hits) >= max_hits:
+                                return hits
                     if read > max_bytes:
                         return hits
         except OSError:
@@ -245,10 +309,10 @@ def running_claude():
 def scan_trust(projects, session_names):
     items = []
     for path, cfg in sorted(projects.items()):
-        cfg = cfg if isinstance(cfg, dict) else {}
+        cfg = as_dict(cfg)
         exists = Path(path).is_dir()
-        allowed = [r for r in cfg.get("allowedTools") or [] if isinstance(r, str)]
-        mcp = cfg.get("mcpServers") or {}
+        allowed = str_list(cfg.get("allowedTools"))
+        mcp = as_dict(cfg.get("mcpServers"))
         broad = [r for r in allowed if is_broad(r)]
         badge = []
         if not exists:
@@ -295,20 +359,27 @@ def scan_sessions(projects, secret_scan):
                 files += 1
                 size += st.st_size
                 mtime = max(mtime, st.st_mtime)
-        hits = scan_secrets(d) if secret_scan else {}
+        hits = scan_secrets(d) if secret_scan else []
         stale = orig is not None and not Path(orig).exists()
         badge = f"{human(size):>7}  {fmt_date(mtime)}"
         if hits:
-            badge += f"  SECRETS:{sum(hits.values())}"
+            badge += f"  SECRETS:{len(hits)}"
         detail = [
             f"Transcripts: {d}",
             f"Project: {orig or 'unknown (not in trusted list)'}" + ("   [no longer exists]" if stale else ""),
             f"{files} files, {human(size)}, last used {fmt_date(mtime)}",
-            "Transcripts hold copies of every file Claude read in that project.",
         ]
         if hits:
-            detail.append("Possible secrets: " + ", ".join(f"{k} x{v}" for k, v in hits.items())
+            kinds = {}
+            for h in hits:
+                kinds[h.kind] = kinds.get(h.kind, 0) + 1
+            detail.append("Possible secrets: " + ", ".join(f"{k} x{v}" for k, v in kinds.items())
                           + "  -> rotate them, then remove")
+            detail += [f"  {h.kind}  {h.file}:{h.line}  {h.redacted}" for h in hits[:3]]
+            if len(hits) > 3:
+                detail.append(f"  ... and {len(hits) - 3} more")
+        else:
+            detail.append("Transcripts hold copies of every file Claude read in that project.")
         items.append(Item("session", str(d), orig or f"(unknown) {d.name}", badge, detail,
                           risky=bool(hits), stale=stale, selected=stale, size=size))
     return items
@@ -358,28 +429,32 @@ def settings_item(f):
 
 def scan_global(cj):
     items = []
-    g = load_json(GLOBAL_SETTINGS) or {}
-    perms = g.get("permissions") or {}
-    for r in perms.get("allow") or []:
+    g = as_dict(load_json(GLOBAL_SETTINGS))
+    perms = as_dict(g.get("permissions"))
+    for r in str_list(perms.get("allow")):
         items.append(Item("gallow", r, f"global allow rule: {r}", "BROAD" if is_broad(r) else "",
                           [f"In {GLOBAL_SETTINGS}", "Applies in every project."], risky=is_broad(r)))
-    for d in perms.get("additionalDirectories") or []:
+    for d in str_list(perms.get("additionalDirectories")):
         exists = Path(os.path.expanduser(d)).exists()
         items.append(Item("gdir", d, f"global extra directory: {d}", "" if exists else "MISSING",
                           [f"In {GLOBAL_SETTINGS}", "Claude can reach this folder from any project."],
                           risky=True, stale=not exists, selected=not exists))
-    if g.get("hooks"):
-        items.append(Item("ghooks", "hooks", "global hooks: " + ", ".join(g["hooks"].keys()), "",
+    hooks = g.get("hooks")
+    if hooks:
+        events = ", ".join(hooks.keys()) if isinstance(hooks, dict) else "?"
+        items.append(Item("ghooks", "hooks", "global hooks: " + events, "",
                           ["Hooks run shell commands automatically on Claude events.",
-                           json.dumps(g["hooks"])[:300]], risky=True))
+                           json.dumps(hooks)[:300]], risky=True))
     if perms.get("defaultMode") == "bypassPermissions":
         items.append(Item("gmode", "bypassPermissions", "global default mode: bypassPermissions", "",
                           ["Claude never asks before acting. Removing restores normal prompts."], risky=True))
-    for name, cfg in (cj.get("mcpServers") or {}).items():
-        cmd = cfg.get("command", cfg.get("url", "?")) if isinstance(cfg, dict) else "?"
+    for name, cfg in as_dict(cj.get("mcpServers")).items():
+        cfg = as_dict(cfg)
+        cmd = cfg.get("command") or cfg.get("url") or "?"
+        args = " ".join(str(a) for a in as_list(cfg.get("args")))
         items.append(Item("gmcp", name, f"MCP server (all projects): {name}", "",
-                          [f"In {CLAUDE_JSON}", f"Runs: {cmd} {' '.join(cfg.get('args', [])) if isinstance(cfg, dict) else ''}"]))
-    missing = [r for r in DENY_RULES if r not in (perms.get("deny") or [])]
+                          [f"In {CLAUDE_JSON}", f"Runs: {cmd} {args}"]))
+    missing = [r for r in DENY_RULES if r not in as_list(perms.get("deny"))]
     if missing:
         items.append(Item("harden", "deny", "HARDEN: add deny rules for keys and .env files",
                           f"+{len(missing)} rules",
@@ -388,8 +463,8 @@ def scan_global(cj):
 
 
 def scan_all(roots, secret_scan=True):
-    cj = load_json(CLAUDE_JSON) or {}
-    projects = cj.get("projects") or {}
+    cj = as_dict(load_json(CLAUDE_JSON))
+    projects = as_dict(cj.get("projects"))
     session_names = {d.name for d in SESSIONS_DIR.iterdir()} if SESSIONS_DIR.is_dir() else set()
     return [
         Category("Trusted projects", "Folders you trusted, with their auto-approve rules (~/.claude.json)",
@@ -426,7 +501,9 @@ def apply_plan(plan):
     os.chmod(QUARANTINE_ROOT, 0o700)
     qdir.mkdir(mode=0o700, exist_ok=True)
     os.chmod(qdir, 0o700)
-    manifest = {"created": ts, "moves": [], "backups": []}
+    # "edits" records each JSON entry removed (or, for harden, added) so that
+    # --restore can put exactly those back without touching anything newer.
+    manifest = {"created": ts, "moves": [], "backups": [], "edits": []}
     log = []
     by = {}
     for it in plan:
@@ -439,17 +516,28 @@ def apply_plan(plan):
             shutil.copy2(p, dest)
             manifest["backups"].append({"original": str(p), "copy": str(dest)})
 
+    def edit(file, path, **undo):
+        manifest["edits"].append({"file": str(file), "path": path, **undo})
+
+    def pop_entry(d, key):
+        """Remove d[key], returning (found, value); value may legitimately be None."""
+        if isinstance(d, dict) and key in d:
+            return True, d.pop(key)
+        return False, None
+
     # ~/.claude.json : trusted projects + user-wide MCP servers
     if by.get("trust") or by.get("gmcp"):
         backup(CLAUDE_JSON)
-        data = load_json(CLAUDE_JSON) or {}
-        projects = data.get("projects") or {}
+        data = as_dict(load_json(CLAUDE_JSON))
         for it in by.get("trust", []):
-            ok = projects.pop(it.key, None) is not None
+            ok, old = pop_entry(data.get("projects"), it.key)
+            if ok:
+                edit(CLAUDE_JSON, ["projects", it.key], set=old)
             log.append(("OK  " if ok else "SKIP") + " forgot project " + it.key)
-        servers = data.get("mcpServers") or {}
         for it in by.get("gmcp", []):
-            ok = servers.pop(it.key, None) is not None
+            ok, old = pop_entry(data.get("mcpServers"), it.key)
+            if ok:
+                edit(CLAUDE_JSON, ["mcpServers", it.key], set=old)
             log.append(("OK  " if ok else "SKIP") + " removed MCP server " + it.key)
         write_json_atomic(CLAUDE_JSON, data)
 
@@ -457,25 +545,31 @@ def apply_plan(plan):
     gkinds = ("gallow", "gdir", "ghooks", "gmode", "harden")
     if any(by.get(k) for k in gkinds):
         backup(GLOBAL_SETTINGS)
-        data = load_json(GLOBAL_SETTINGS) or {}
-        perms = data.setdefault("permissions", {})
-        for it in by.get("gallow", []):
-            if it.key in perms.get("allow", []):
-                perms["allow"].remove(it.key)
-                log.append("OK   removed allow rule " + it.key)
-        for it in by.get("gdir", []):
-            if it.key in perms.get("additionalDirectories", []):
-                perms["additionalDirectories"].remove(it.key)
-                log.append("OK   removed extra directory " + it.key)
-        if by.get("ghooks") and data.pop("hooks", None) is not None:
+        data = as_dict(load_json(GLOBAL_SETTINGS))
+        perms = data.get("permissions")
+        if not isinstance(perms, dict):
+            perms = data["permissions"] = {}
+        for kind, field_, what in (("gallow", "allow", "allow rule"),
+                                   ("gdir", "additionalDirectories", "extra directory")):
+            rules = as_list(perms.get(field_))
+            for it in by.get(kind, []):
+                if it.key in rules:
+                    rules.remove(it.key)
+                    edit(GLOBAL_SETTINGS, ["permissions", field_], append=it.key)
+                    log.append(f"OK   removed {what} {it.key}")
+        if by.get("ghooks") and "hooks" in data:
+            edit(GLOBAL_SETTINGS, ["hooks"], set=data.pop("hooks"))
             log.append("OK   removed global hooks")
         if by.get("gmode") and perms.get("defaultMode") == "bypassPermissions":
-            del perms["defaultMode"]
+            edit(GLOBAL_SETTINGS, ["permissions", "defaultMode"], set=perms.pop("defaultMode"))
             log.append("OK   removed bypassPermissions mode")
         if by.get("harden"):
-            deny = perms.setdefault("deny", [])
+            deny = perms.get("deny")
+            if not isinstance(deny, list):
+                deny = perms["deny"] = []
             added = [r for r in DENY_RULES if r not in deny]
             deny.extend(added)
+            edit(GLOBAL_SETTINGS, ["permissions", "deny"], remove=added)
             log.append(f"OK   added {len(added)} deny rules")
         GLOBAL_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
         write_json_atomic(GLOBAL_SETTINGS, data)
@@ -501,11 +595,41 @@ def apply_plan(plan):
     return log
 
 
+def put_back(data, e):
+    """Undo one manifest edit inside the file's current contents. Returns True if it changed anything."""
+    node = data
+    for k in e["path"][:-1]:
+        if not isinstance(node.get(k), dict):
+            node[k] = {}
+        node = node[k]
+    last = e["path"][-1]
+    if "set" in e:                      # a removed entry: put it back unless something newer is there
+        if last in node:
+            return False
+        node[last] = e["set"]
+        return True
+    if not isinstance(node.get(last), list):
+        node[last] = []
+    lst = node[last]
+    if "append" in e:                   # a removed list rule
+        if e["append"] in lst:
+            return False
+        lst.append(e["append"])
+        return True
+    changed = False
+    for r in e.get("remove", []):       # rules that harden added
+        if r in lst:
+            lst.remove(r)
+            changed = True
+    return changed
+
+
 def restore(qdir):
-    manifest = load_json(Path(qdir) / "manifest.json")
-    if not manifest:
+    qdir = Path(qdir)
+    manifest = load_json(qdir / "manifest.json")
+    if not isinstance(manifest, dict):
         sys.exit(f"No manifest.json in {qdir}")
-    for m in reversed(manifest["moves"]):
+    for m in reversed(as_list(manifest.get("moves"))):
         src, dest = Path(m["quarantined"]), Path(m["original"])
         if dest.exists():
             print(f"SKIP {dest} already exists")
@@ -513,9 +637,26 @@ def restore(qdir):
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dest))
         print(f"OK   restored {dest}")
-    for b in manifest["backups"]:
-        shutil.copy2(b["copy"], b["original"])
-        print(f"OK   restored {b['original']} from backup")
+    # Removed JSON entries go back into the file as it is NOW, so whatever Claude
+    # Code wrote since the run is kept. The full backup is only used when the
+    # file is gone or unreadable, or for 0.1.0 manifests that have no "edits".
+    edits = {}
+    for e in as_list(manifest.get("edits")):
+        edits.setdefault(e["file"], []).append(e)
+    backups = {b["original"]: b["copy"] for b in as_list(manifest.get("backups"))}
+    for file in sorted(set(edits) | set(backups)):
+        if "edits" in manifest:
+            data = load_json(file)
+            if isinstance(data, dict):
+                n = sum(put_back(data, e) for e in edits.get(file, []))
+                write_json_atomic(Path(file), data)
+                print(f"OK   put {n} entr{'y' if n == 1 else 'ies'} back into {file}")
+                continue
+        if file in backups:
+            shutil.copy2(backups[file], file)
+            print(f"OK   restored {file} from backup")
+        else:
+            print(f"SKIP {file}: unreadable and no backup in {qdir}")
 
 
 def show_in(it, mode):
@@ -853,7 +994,35 @@ def main():
     ap.add_argument("--accent", default=os.environ.get("CLAUDE_REVOKE_ACCENT", "blue"),
                     help="bar color from your terminal theme palette: 0-15 or a name like blue, bright-magenta")
     ap.add_argument("--no-secret-scan", action="store_true", help="skip scanning transcripts for secrets")
+    ap.add_argument("--pause", action="store_true",
+                    help="wait for Enter before exiting (keeps a launcher-opened terminal window open)")
     args = ap.parse_args()
+    if not args.pause:
+        run(args, ap)
+        return
+    # Launched from the desktop entry: the terminal closes when we exit, so hold
+    # the window until Enter, including after an error or a usage message.
+    code = 0
+    try:
+        run(args, ap)
+    except SystemExit as e:
+        code = e.code
+        if isinstance(code, str):
+            print(code, file=sys.stderr)
+            code = 1
+    except KeyboardInterrupt:
+        code = 130
+    except Exception:
+        traceback.print_exc()
+        code = 1
+    try:
+        input("\nPress Enter to close this window... ")
+    except (EOFError, OSError):
+        pass
+    sys.exit(code)
+
+
+def run(args, ap):
     global ACCENT
     try:
         ACCENT = parse_accent(args.accent)

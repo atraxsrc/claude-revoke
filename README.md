@@ -24,7 +24,7 @@ Every time you run Claude Code in a folder and click **"Always allow"**, it reme
 
 - **Full inventory**: trusted folders, "always allow" rules, extra directories, session transcripts, per-project settings files, hooks and MCP servers.
 - **Grouped checkboxes**: STALE (folder deleted), RISKY (broad rules such as `Bash(*)`, bypass mode, hooks, leaked secrets) and OK. Tick a whole group or one folder at a time.
-- **Secret scan**: finds AWS keys, private keys, GitHub/Slack/API tokens and `KEY=value` lines inside saved transcripts, so you know what to rotate.
+- **Secret scan**: finds AWS keys, private keys, GitHub/Slack/API tokens and `KEY=value` lines inside saved transcripts, and shows the file, line and a redacted preview of each, so you know what to rotate. Identifiers and placeholders like `your_password_here` are filtered out.
 - **Hardening**: one tick adds deny rules for `~/.ssh`, `~/.aws`, `.env`, `*.pem` and similar.
 - **Safe by design**: dry-run mode, a review screen, typed `YES` confirmation, JSON backups, quarantine instead of delete, and `--restore`.
 - **Theme-aware**: draws only with your terminal's own palette, so it matches your rice.
@@ -59,6 +59,7 @@ claude-revoke --dry-run                # full UI, applying changes nothing
 claude-revoke                          # the real thing (close Claude Code first)
 claude-revoke --restore ~/.claude-revoke-quarantine/<timestamp>
 claude-revoke --roots ~/code ~/work    # limit where it searches for project settings
+claude-revoke --pause                  # wait for Enter before closing (the launcher entry uses this)
 ```
 
 ### Keys
@@ -97,7 +98,7 @@ export CLAUDE_REVOKE_ACCENT=yellow      # make it permanent (~/.bashrc)
 | `<project>/.claude/settings*.json` | Per-project rules and hooks | Moved to quarantine |
 | `~/.claude/settings.json` | Global rules, extra dirs, hooks, bypass mode | Entry removed (file backed up) |
 
-Everything removed lands in `~/.claude-revoke-quarantine/<timestamp>/` together with a `manifest.json`. Check that nothing broke, then delete that folder for good.
+Everything removed lands in `~/.claude-revoke-quarantine/<timestamp>/` together with a `manifest.json`. Check that nothing broke, then delete that folder for good. `--restore` puts back only what that run removed, so anything Claude Code has written to its files since is kept.
 
 > [!IMPORTANT]
 > Close all Claude Code sessions before applying. A running session can write `~/.claude.json` again and undo your changes. claude-revoke warns you if it detects one.
