@@ -164,6 +164,13 @@ packaging/build.sh                      # builds the .deb, .rpm and Arch package
 
 - [ ] AUR and COPR packages if people ask for them
 
+## See also
+
+[git-safety-net](https://github.com/atraxsrc/git-safety-net): a global gitleaks
+hook that blocks commits containing secrets in every repo on your machine, plus
+a scanner for repos you already have. claude-revoke finds secrets in Claude's
+session transcripts, git-safety-net keeps them out of git.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
